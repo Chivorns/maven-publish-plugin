@@ -1,25 +1,16 @@
 // Helper method to load properties from multiple files
 def loadPropertiesFromFiles() {
-    def secretPropsFile = project.rootProject.file('local.properties')
-    def credentialPropsFile = project.rootProject.file('credential.properties')
-
+    def propertiesFiles = ['local.properties', 'credential.properties']
     Properties p = new Properties()
 
-    // First load from local.properties
-    if (secretPropsFile.exists()) {
-        secretPropsFile.withInputStream { stream ->
-            p.load(stream)
+    propertiesFiles.each { filename ->
+        def propsFile = project.rootProject.file(filename)
+        if (propsFile.exists()) {
+            propsFile.withInputStream { stream -> p.load(stream) }
         }
     }
 
-    // Then load from credential.properties (this can overwrite properties from local.properties)
-    if (credentialPropsFile.exists()) {
-        credentialPropsFile.withInputStream { stream ->
-            p.load(stream)
-        }
-    }
-
-    // Store properties in project.ext so they can be accessed globally
+    // Store properties in project.ext for global access
     p.each { name, value -> ext[name] = value }
 }
 
@@ -31,20 +22,32 @@ def getRequiredProperty(String propertyName) {
     return project.property(propertyName)
 }
 
+loadPropertiesFromFiles()
+
 // Root-level Nexus publishing setup
 if (project == rootProject) {
-    loadPropertiesFromFiles()
+    def sonatypeUsername = project.findProperty('sonatype.username')
+    def sonatypePassword = project.findProperty('sonatype.password')
+    if (sonatypeUsername != null && sonatypePassword != null) {
+        nexusPublishing {
+            repositories {
+                sonatype {
+                    username = sonatypeUsername
+                    password = sonatypePassword
+                    stagingProfileId = getRequiredProperty('sonatype.stagingProfileId')
 
-    nexusPublishing {
-        repositories {
-            sonatype {
-                stagingProfileId = getRequiredProperty('sonatypeStagingProfileId')
-                username = getRequiredProperty('publish.username')
-                password = getRequiredProperty('publish.password')
+                    // Optional URLs from configuration
+                    def publishReleaseUrl = project.findProperty('sonatype.releaseUrl')
+                    def publishSnapshotUrl = project.findProperty('sonatype.snapshotUrl')
 
-                // Uncomment if needed for newer Sonatype users
-                // nexusUrl.set(uri("https://s01.oss.sonatype.org/service/local/"))
-                // snapshotRepositoryUrl.set(uri("https://s01.oss.sonatype.org/content/repositories/snapshots/"))
+                    if (publishReleaseUrl != null) {
+                        nexusUrl.set(uri(publishReleaseUrl))
+                    }
+
+                    if (publishSnapshotUrl != null && version.endsWith('-SNAPSHOT')) {
+                        snapshotRepositoryUrl.set(uri(publishSnapshotUrl))
+                    }
+                }
             }
         }
     }
@@ -67,14 +70,13 @@ if (project == rootProject) {
     group = getRequiredProperty('PUBLISH_GROUP_ID')
     version = getRequiredProperty('PUBLISH_VERSION')
 
-    def artifactId = getRequiredProperty('PUBLISH_ARTIFACT_ID')
-
     afterEvaluate {
         publishing {
             publications {
                 release(MavenPublication) {
-                    artifactId = artifactId
+                    generateMetadataFileForReleasePublication.dependsOn tasks.named('androidSourcesJar')
                     groupId = group
+                    artifactId = getRequiredProperty('PUBLISH_ARTIFACT_ID')
                     version = version
 
                     // Add components based on module type
@@ -85,41 +87,55 @@ if (project == rootProject) {
                     }
 
                     // Add sources JAR
-                    artifact androidSourcesJar
+                    artifact tasks.named('androidSourcesJar')
 
                     // Configure POM metadata
                     pom {
-                        name.set(artifactId)
-                        description.set(getRequiredProperty('PUBLISH_DESCRIPTION'))
-                        url.set(getRequiredProperty('PUBLISH_URL'))
-
+                        name = getRequiredProperty('PUBLISH_ARTIFACT_ID')
+                        description = getRequiredProperty('PUBLISH_DESCRIPTION')
+                        url = getRequiredProperty('PUBLISH_URL')
                         licenses {
                             license {
-                                name.set(getRequiredProperty('PUBLISH_LICENSE_NAME'))
-                                // Uncomment if required
-                                // url.set(getRequiredProperty('PUBLISH_LICENSE_URL'))
+                                name = getRequiredProperty('PUBLISH_LICENSE_NAME')
+                                //url = getRequiredProperty('PUBLISH_LICENSE_URL')
                             }
                         }
                         developers {
                             developer {
-                                id.set(getRequiredProperty('PUBLISH_DEVELOPER_ID'))
-                                name.set(getRequiredProperty('PUBLISH_DEVELOPER_NAME'))
-                                email.set(getRequiredProperty('PUBLISH_DEVELOPER_EMAIL'))
+                                id = getRequiredProperty('PUBLISH_DEVELOPER_ID')
+                                name = getRequiredProperty('PUBLISH_DEVELOPER_NAME')
+                                email = getRequiredProperty('PUBLISH_DEVELOPER_EMAIL')
                             }
                         }
                         scm {
-                            connection.set(getRequiredProperty('PUBLISH_SCM_CONNECTION'))
-                            developerConnection.set(getRequiredProperty('PUBLISH_SCM_DEVELOPER_CONNECTION'))
-                            url.set(getRequiredProperty('PUBLISH_SCM_URL'))
+                            connection = getRequiredProperty('PUBLISH_SCM_CONNECTION')
+                            developerConnection = getRequiredProperty('PUBLISH_SCM_DEVELOPER_CONNECTION')
+                            url = getRequiredProperty('PUBLISH_SCM_URL')
                         }
                     }
                 }
             }
-        }
 
-        // Automatically sign publications
-        signing {
-            sign publishing.publications.release
+            // Maven repository configuration
+            repositories {
+                maven {
+                    credentials {
+                        username = project.findProperty('nexus.username')
+                        password = project.findProperty('nexus.password')
+                    }
+
+                    def publishReleaseUrl = project.findProperty('nexus.releaseUrl')
+                    def publishSnapshotUrl = project.findProperty('nexus.snapshotUrl')
+
+                    url = version.endsWith('-SNAPSHOT') ? publishSnapshotUrl : publishReleaseUrl
+                    allowInsecureProtocol = true
+                }
+            }
+
+            // Automatically sign publications
+            signing {
+                sign publishing.publications.release
+            }
         }
     }
 }
