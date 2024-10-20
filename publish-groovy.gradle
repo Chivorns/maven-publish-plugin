@@ -1,0 +1,125 @@
+// Helper method to load properties from multiple files
+def loadPropertiesFromFiles() {
+    def secretPropsFile = project.rootProject.file('local.properties')
+    def credentialPropsFile = project.rootProject.file('credential.properties')
+
+    Properties p = new Properties()
+
+    // First load from local.properties
+    if (secretPropsFile.exists()) {
+        secretPropsFile.withInputStream { stream ->
+            p.load(stream)
+        }
+    }
+
+    // Then load from credential.properties (this can overwrite properties from local.properties)
+    if (credentialPropsFile.exists()) {
+        credentialPropsFile.withInputStream { stream ->
+            p.load(stream)
+        }
+    }
+
+    // Store properties in project.ext so they can be accessed globally
+    p.each { name, value -> ext[name] = value }
+}
+
+// Helper method to fetch required properties
+def getRequiredProperty(String propertyName) {
+    if (!project.hasProperty(propertyName)) {
+        throw new GradleException("Missing required property: $propertyName")
+    }
+    return project.property(propertyName)
+}
+
+// Root-level Nexus publishing setup
+if (project == rootProject) {
+    loadPropertiesFromFiles()
+
+    nexusPublishing {
+        repositories {
+            sonatype {
+                stagingProfileId = getRequiredProperty('sonatypeStagingProfileId')
+                username = getRequiredProperty('publish.username')
+                password = getRequiredProperty('publish.password')
+
+                // Uncomment if needed for newer Sonatype users
+                // nexusUrl.set(uri("https://s01.oss.sonatype.org/service/local/"))
+                // snapshotRepositoryUrl.set(uri("https://s01.oss.sonatype.org/content/repositories/snapshots/"))
+            }
+        }
+    }
+} else {
+
+// Apply Maven Publish and Signing plugins
+    apply plugin: 'maven-publish'
+    apply plugin: 'signing'
+
+// Register the Android sources JAR task
+    tasks.register('androidSourcesJar', Jar) {
+        if (project.plugins.findPlugin("com.android.library")) {
+            from android.sourceSets.main.java.srcDirs
+        } else {
+            from sourceSets.main.java.srcDirs
+        }
+    }
+
+// Use project-specific properties for group, artifactId, and version
+    group = getRequiredProperty('PUBLISH_GROUP_ID')
+    version = getRequiredProperty('PUBLISH_VERSION')
+
+    def artifactId = getRequiredProperty('PUBLISH_ARTIFACT_ID')
+
+    afterEvaluate {
+        publishing {
+            publications {
+                release(MavenPublication) {
+                    artifactId = artifactId
+                    groupId = group
+                    version = version
+
+                    // Add components based on module type
+                    if (project.plugins.findPlugin("com.android.library")) {
+                        from components.release
+                    } else {
+                        artifact "$buildDir/libs/${project.name}-${version}.jar"
+                    }
+
+                    // Add sources JAR
+                    artifact androidSourcesJar
+
+                    // Configure POM metadata
+                    pom {
+                        name.set(artifactId)
+                        description.set(getRequiredProperty('PUBLISH_DESCRIPTION'))
+                        url.set(getRequiredProperty('PUBLISH_URL'))
+
+                        licenses {
+                            license {
+                                name.set(getRequiredProperty('PUBLISH_LICENSE_NAME'))
+                                // Uncomment if required
+                                // url.set(getRequiredProperty('PUBLISH_LICENSE_URL'))
+                            }
+                        }
+                        developers {
+                            developer {
+                                id.set(getRequiredProperty('PUBLISH_DEVELOPER_ID'))
+                                name.set(getRequiredProperty('PUBLISH_DEVELOPER_NAME'))
+                                email.set(getRequiredProperty('PUBLISH_DEVELOPER_EMAIL'))
+                            }
+                        }
+                        scm {
+                            connection.set(getRequiredProperty('PUBLISH_SCM_CONNECTION'))
+                            developerConnection.set(getRequiredProperty('PUBLISH_SCM_DEVELOPER_CONNECTION'))
+                            url.set(getRequiredProperty('PUBLISH_SCM_URL'))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Automatically sign publications
+        signing {
+            sign publishing.publications.release
+        }
+    }
+}
