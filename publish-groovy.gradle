@@ -1,3 +1,7 @@
+// Apply Maven Publish and Signing plugins
+apply plugin: 'maven-publish'
+apply plugin: 'signing'
+
 // Helper method to load properties from multiple files
 def loadPropertiesFromFiles() {
     def propertiesFiles = ['local.properties', 'credential.properties']
@@ -20,6 +24,11 @@ def getRequiredProperty(String propertyName) {
         throw new GradleException("Missing required property: $propertyName")
     }
     return project.property(propertyName)
+}
+
+// Helper method to fetch optional properties (return null if not found)
+def getOptionalProperty(String propertyName) {
+    return project.hasProperty(propertyName) ? project.property(propertyName) : null
 }
 
 loadPropertiesFromFiles()
@@ -51,43 +60,43 @@ if (project == rootProject) {
             }
         }
     }
-} else {
+}
 
-// Apply Maven Publish and Signing plugins
-    apply plugin: 'maven-publish'
-    apply plugin: 'signing'
-
-// Register the Android sources JAR task
-    tasks.register('androidSourcesJar', Jar) {
-        if (project.plugins.findPlugin("com.android.library")) {
-            from android.sourceSets.main.java.srcDirs
-        } else {
-            from sourceSets.main.java.srcDirs
-        }
+// Register the Android sources JAR task only if the project is an Android library
+tasks.register('androidSourcesJar', Jar) {
+    if (project.plugins.findPlugin("com.android.library")) {
+        from android.sourceSets.main.java.srcDirs
+    } else {
+        //   from sourceSets.main.java.srcDirs
     }
+}
 
 // Use project-specific properties for group, artifactId, and version
+// Only apply group and version if properties exist, otherwise skip
+if (project.hasProperty('PUBLISH_GROUP_ID') && project.hasProperty('PUBLISH_VERSION')) {
     group = getRequiredProperty('PUBLISH_GROUP_ID')
     version = getRequiredProperty('PUBLISH_VERSION')
+}
 
-    afterEvaluate {
+afterEvaluate {
+    if (project.hasProperty('PUBLISH_GROUP_ID') && project.hasProperty('PUBLISH_ARTIFACT_ID') && project.hasProperty('PUBLISH_VERSION')) {
         publishing {
             publications {
                 release(MavenPublication) {
-                    generateMetadataFileForReleasePublication.dependsOn tasks.named('androidSourcesJar')
                     groupId = group
                     artifactId = getRequiredProperty('PUBLISH_ARTIFACT_ID')
                     version = version
 
                     // Add components based on module type
                     if (project.plugins.findPlugin("com.android.library")) {
+                        generateMetadataFileForReleasePublication.dependsOn tasks.named('androidSourcesJar')
                         from components.release
+                        // Add sources JAR
+                        artifact tasks.named('androidSourcesJar')
                     } else {
-                        artifact "$buildDir/libs/${project.name}-${version}.jar"
+                        from components.java
+                        // artifact "$buildDir/libs/${project.name}-${version}.jar"
                     }
-
-                    // Add sources JAR
-                    artifact tasks.named('androidSourcesJar')
 
                     // Configure POM metadata
                     pom {
