@@ -62,6 +62,19 @@ if (project == rootProject) {
     }
 }
 
+// Task to generate sources JAR
+tasks.register('sourcesJar', Jar) {
+    archiveClassifier.set('sources')
+    from sourceSets.main.allSource
+}
+
+// Task to generate Javadoc JAR
+tasks.register('javadocJar', Jar) {
+    dependsOn tasks.javadoc
+    archiveClassifier.set('javadoc')
+    from tasks.javadoc.destinationDir
+}
+
 // Register the Android sources JAR task only if the project is an Android library
 tasks.register('androidSourcesJar', Jar) {
     if (project.plugins.findPlugin("com.android.library")) {
@@ -95,7 +108,9 @@ afterEvaluate {
                         artifact tasks.named('androidSourcesJar')
                     } else {
                         from components.java
-                        // artifact "$buildDir/libs/${project.name}-${version}.jar"
+                        // Add sources and javadoc JARs
+                        artifact tasks.named('sourcesJar')
+                        artifact tasks.named('javadocJar')
                     }
 
                     // Configure POM metadata
