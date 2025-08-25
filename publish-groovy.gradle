@@ -66,6 +66,7 @@ if (project == rootProject) {
 if (project.plugins.findPlugin("com.android.library")) {
     // Register the Android sources JAR task only if the project is an Android library
     tasks.register('androidSourcesJar', Jar) {
+        archiveClassifier.set('sources')
         from android.sourceSets.main.java.srcDirs
     }
 } else if (project.plugins.findPlugin("java") || project.plugins.findPlugin("java-library")) {
@@ -104,12 +105,12 @@ afterEvaluate {
                         generateMetadataFileForReleasePublication.dependsOn tasks.named('androidSourcesJar')
                         from components.release
                         // Add sources JAR
-                        artifact tasks.named('androidSourcesJar')
+                        artifact tasks.named('androidSourcesJar').get()
                     } else {
                         from components.java
                         // Add sources and javadoc JARs
-                        artifact tasks.named('sourcesJar')
-                        artifact tasks.named('javadocJar')
+                        artifact tasks.named('sourcesJar').get()
+                        artifact tasks.named('javadocJar').get()
                     }
 
                     // Configure POM metadata
