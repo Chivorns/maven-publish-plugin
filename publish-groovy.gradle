@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 // Apply Maven Publish and Signing plugins
 apply plugin: 'maven-publish'
 apply plugin: 'signing'
@@ -154,12 +156,78 @@ afterEvaluate {
                     url = version.endsWith('-SNAPSHOT') ? publishSnapshotUrl : publishReleaseUrl
                     allowInsecureProtocol = true
                 }
+
+                // Maven Local repository
+                mavenLocal()
             }
 
             // Automatically sign publications
             signing {
                 sign publishing.publications.release
             }
+        }
+
+        // ===== Generate checksum task =====
+        tasks.register('generateAllChecksums') {
+            dependsOn publishToMavenLocal
+            doLast {
+                println "Generating MD5 and SHA1 for Maven artifacts..."
+
+                def artifactFiles = []
+
+                // --- Build directory artifacts ---
+                if (project.plugins.findPlugin("com.android.library")) {
+                    artifactFiles += tasks.named('androidSourcesJar').get().archiveFile.get().asFile
+                    artifactFiles += fileTree("$buildDir/outputs/aar").files
+                } else {
+                    artifactFiles += tasks.named('sourcesJar').get().archiveFile.get().asFile
+                    artifactFiles += tasks.named('javadocJar').get().archiveFile.get().asFile
+                    artifactFiles += fileTree("$buildDir/libs").files
+                }
+
+                // --- Maven Local artifacts ---
+                def mavenLocalDir = new File(System.getProperty("user.home"), ".m2/repository")
+                def groupPath = getRequiredProperty('PUBLISH_GROUP_ID')?.replace('.', '/')
+                def artifactId = getRequiredProperty('PUBLISH_ARTIFACT_ID')
+                def versionStr = getRequiredProperty('PUBLISH_VERSION')
+
+                if (!groupPath || !artifactId || !versionStr) {
+                    throw new GradleException("Project 'group', 'artifactId', or 'version' is not set properly.")
+                }
+
+                def artifactDir = new File(mavenLocalDir, "${groupPath}/${artifactId}/${versionStr}")
+                if (artifactDir.exists()) {
+                    artifactDir.eachFile { File f -> artifactFiles += f }
+                }
+
+                // --- Filter only files that need checksums ---
+                def filesToChecksum = artifactFiles.unique().findAll { f ->
+                    f.isFile() && (f.name.endsWith('.jar') || f.name.endsWith('.aar') || f.name.endsWith('.pom') || f.name.endsWith('.module'))
+                }
+
+                // --- Generate checksums ---
+                filesToChecksum.each { File f ->
+                    ['MD5', 'SHA-1'].each { alg ->
+                        MessageDigest digest = MessageDigest.getInstance(alg)
+                        f.withInputStream { is ->
+                            byte[] buffer = new byte[8192]
+                            int read
+                            while ((read = is.read(buffer)) > 0) {
+                                digest.update(buffer, 0, read)
+                            }
+                        }
+                        def checksum = digest.digest().collect { String.format("%02x", it) }.join()
+                        def checksumFile = new File(f.parentFile, "${f.name}.${alg.toLowerCase().replace('-', '')}")
+                        checksumFile.text = checksum
+                        println "Generated $checksumFile"
+                    }
+                }
+            }
+        }
+
+        // Automatically run after Maven Local publish
+        tasks.named('publishToMavenLocal') {
+            finalizedBy generateAllChecksums
         }
     }
 }
