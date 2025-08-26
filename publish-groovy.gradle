@@ -68,7 +68,7 @@ if (project == rootProject) {
 if (project.plugins.findPlugin("com.android.library")) {
     // Register the Android sources JAR task only if the project is an Android library
     tasks.register('androidSourcesJar', Jar) {
-        archiveClassifier.set('sources')
+       // archiveClassifier.set('sources')
         from android.sourceSets.main.java.srcDirs
     }
 } else if (project.plugins.findPlugin("java") || project.plugins.findPlugin("java-library")) {
